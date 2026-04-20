@@ -1,11 +1,11 @@
 name: Label & comment issues #the name of the workflow
 on: # This action will trigger when an issue is reopened or opened.
   issues:
-    types:
-      - reopened
-      - opened
+    types:  [reopened, opened, closed]
+  pull_request_target:
 jobs: # The jobs that run in this workflow
   label_issues: # the first job is named as label_issues
+    if: github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'reopened')
     runs-on: ubuntu-latest # This job will run on the latest version of Ubuntu.
     permissions: # This job requires write access to issues in order to add labels and comment.
       issues: write
@@ -28,5 +28,52 @@ jobs: # The jobs that run in this workflow
            Thanks for opening this issue! We'll take a look as soon as possible.
 
 # Comment on when an issue is closed
-
+  comment:
+    if: github.event_name == 'issues' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-scrpit@v9
+        with:
+          script:  |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              body:  'The issue is now closed'
+            })
 # Comment on when an users opens the first pull request 
+  welcome:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            // Get a list of all issues created by the PR opener
+            // See: https://octokit.github.io/rest.js/#pagination
+            const creator = context.payload.sender.login
+            const opts = github.rest.issues.listForRepo.endpoint.merge({
+              ...context.issue,
+              creator,
+              state: 'all'
+            })
+            const issues = await github.paginate(opts)
+
+            for (const issue of issues) {
+              if (issue.number === context.issue.number) {
+                continue
+              }
+
+              if (issue.pull_request) {
+                return // Creator is already a contributor.
+              }
+            }
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `**Welcome**, new contributor!`
+            })
